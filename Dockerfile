@@ -1,13 +1,20 @@
-# Использование легковесного Python-образа
 FROM python:3.11-slim
 
-# Установка зависимостей Python
 WORKDIR /app
+
+# Установить ffmpeg для работы с pydub
+RUN apt-get update && apt-get install -y ffmpeg
+
+# Установить зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip
 
-# Копирование файлов проекта
+# Скопировать остальные файлы
 COPY . .
+
+# Установить порт
+ENV PORT=8080
 
 # Запуск приложения
 CMD ["python", "main.py"]
