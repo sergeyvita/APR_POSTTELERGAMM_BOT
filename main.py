@@ -4,6 +4,7 @@ from aiohttp import web
 from dotenv import load_dotenv
 import openai
 import aiohttp
+import pandas as pd
 from pydub import AudioSegment
 from asyncio import Event
 
@@ -44,100 +45,47 @@ async def handle_webhook(request):
         if "message" in data:
             chat_id = data["message"]["chat"]["id"]
 
-            if "voice" in data["message"]:
-                file_id = data["message"]["voice"]["file_id"]
-                file_path = await get_file_path(file_id)
-
-                if file_path:
-                    audio_content = await download_file(file_path)
-                    transcript = await process_audio(audio_content)
-
-                    if transcript:
-                        response = await generate_openai_response(transcript)
-                    else:
-                        response = "Не удалось обработать голосовое сообщение."
-
-                    await send_message(chat_id, response)
-
-            elif "text" in data["message"]:
+            if "text" in data["message"]:
                 user_message = data["message"]["text"]
-                username = data["message"]["from"].get("username", "")
 
-                stop_event = Event()
-                typing_task = asyncio.create_task(send_typing_action_while_processing(chat_id, stop_event))
-
-                try:
-                    # Условная логика пользователей
-                    if username == "di_agent01":
-                        response = await generate_openai_response(user_message)
-                        response += "\nНаписать в WhatsApp: wa.me/79281497703"
-                    elif username == "Alinalyusaya":
-                        response = await generate_openai_response(user_message)
-                        response += "\nНаписать в WhatsApp: wa.me/79281237003"
-                    elif username == "ElenaZelenskaya1":
-                        response = await generate_openai_response(user_message)
-                        response += "\nНаписать в WhatsApp: wa.me/79384242393"
-                    elif username == "uliya_az":
-                        response = await generate_openai_response(user_message)
-                        response += "\nНаписать в WhatsApp: wa.me/79001883558"
-                    elif username == "alexey_turskiy":
-                        response = await generate_openai_response(user_message)
-                        response += "\nНаписать в WhatsApp: wa.me/9281419636"
-                    else:
-                        response = await generate_openai_response(user_message)
-
+                if user_message.lower() == "/analyze_file":
+                    response = await analyze_file()
                     await send_message(chat_id, response)
-                finally:
-                    stop_event.set()
-                    await typing_task
+                else:
+                    response = await generate_openai_response(user_message)
+                    await send_message(chat_id, response)
 
         return web.json_response({"status": "ok"})
     except Exception as e:
         print(f"Ошибка обработки вебхука: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
-async def get_file_path(file_id):
+async def analyze_file():
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
+        # Ссылка на файл на Яндекс.Диске
+        file_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
+        save_path = "downloaded_file.xlsx"
+
+        # Преобразование ссылки в прямую
+        direct_url = f"{file_url}?export=download"
+
+        # Скачивание файла
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                result = await response.json()
-                print(f"Ответ Telegram API для getFile: {result}")
-                return result['result']['file_path']
+            async with session.get(direct_url) as response:
+                with open(save_path, "wb") as f:
+                    f.write(await response.read())
+
+        # Чтение и анализ данных
+        df = pd.read_excel(save_path)
+        result = df.describe()  # Генерация простой статистики
+
+        return f"Файл успешно проанализирован:\n{result.to_string()}"
     except Exception as e:
-        print(f"Ошибка при получении пути файла: {e}")
-        return None
-
-async def download_file(file_path):
-    try:
-        file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as response:
-                return await response.read()
-    except Exception as e:
-        print(f"Ошибка при скачивании файла: {e}")
-        return None
-
-async def process_audio(audio_content):
-    try:
-        temp_file = "temp_audio.ogg"
-        with open(temp_file, "wb") as f:
-            f.write(audio_content)
-
-        audio = AudioSegment.from_file(temp_file, format="ogg")
-        wav_file = "temp_audio.wav"
-        audio.export(wav_file, format="wav")
-
-        transcript = "Голосовое сообщение успешно преобразовано."
-        return transcript
-    except Exception as e:
-        print(f"Ошибка при обработке аудио: {e}")
-        return None
+        print(f"Ошибка анализа файла: {e}")
+        return "Не удалось обработать файл."
     finally:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
-        if os.path.exists(wav_file):
-            os.remove(wav_file)
+        if os.path.exists(save_path):
+            os.remove(save_path)
 
 async def send_message(chat_id, text):
     try:
@@ -149,17 +97,6 @@ async def send_message(chat_id, text):
                 print(f"Ответ Telegram API: {result}")
     except Exception as e:
         print(f"Ошибка при отправке сообщения: {e}")
-
-async def send_typing_action_while_processing(chat_id, stop_event):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendChatAction"
-        payload = {"chat_id": chat_id, "action": "typing"}
-        async with aiohttp.ClientSession() as session:
-            while not stop_event.is_set():
-                async with session.post(url, json=payload) as response:
-                    await asyncio.sleep(5)
-    except Exception as e:
-        print(f"Ошибка в send_typing_action_while_processing: {e}")
 
 async def generate_openai_response(user_message):
     try:
