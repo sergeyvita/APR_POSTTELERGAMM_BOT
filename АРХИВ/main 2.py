@@ -51,10 +51,6 @@ async def handle_webhook(request):
                 if user_message.lower() == "/analyze_file":
                     response = await analyze_file()
                     await send_message(chat_id, response)
-                elif user_message.lower().startswith("/find_price"):
-                    query = user_message.replace("/find_price", "").strip()
-                    response = await analyze_file_with_query(query)
-                    await send_message(chat_id, response)
                 else:
                     response = await generate_openai_response(user_message)
                     await send_message(chat_id, response)
@@ -84,44 +80,6 @@ async def analyze_file():
         result = df.describe()  # Генерация простой статистики
 
         return f"Файл успешно проанализирован:\n{result.to_string()}"
-    except Exception as e:
-        print(f"Ошибка анализа файла: {e}")
-        return "Не удалось обработать файл."
-    finally:
-        if os.path.exists(save_path):
-            os.remove(save_path)
-
-async def analyze_file_with_query(query):
-    try:
-        # Ссылка на файл на Яндекс.Диске
-        file_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
-        save_path = "downloaded_file.xlsx"
-
-        # Преобразование ссылки в прямую
-        direct_url = f"{file_url}?export=download"
-
-        # Скачивание файла
-        async with aiohttp.ClientSession() as session:
-            async with session.get(direct_url) as response:
-                with open(save_path, "wb") as f:
-                    f.write(await response.read())
-
-        # Чтение данных
-        df = pd.read_excel(save_path)
-
-        # Проверка на наличие колонки "Цена"
-        if "Цена" not in df.columns:
-            return "Колонка 'Цена' не найдена в файле."
-
-        # Фильтрация данных по запросу
-        try:
-            condition = eval(f"df['Цена'] {query}")  # Пример: "< 5000000"
-            filtered_data = df[condition]
-            if filtered_data.empty:
-                return "Не найдено записей, соответствующих запросу."
-            return f"Найдены цены:\n{filtered_data['Цена'].to_list()}"
-        except Exception as e:
-            return f"Ошибка при обработке условия: {e}"
     except Exception as e:
         print(f"Ошибка анализа файла: {e}")
         return "Не удалось обработать файл."

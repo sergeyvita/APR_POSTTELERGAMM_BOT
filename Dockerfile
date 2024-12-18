@@ -1,19 +1,23 @@
 FROM python:3.11-slim
 
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
+
+# Создание рабочей директории
 WORKDIR /app
 
-# Установить ffmpeg для работы с pydub
-RUN apt-get update && apt-get install -y ffmpeg
+# Создание и активация виртуальной среды
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Установить зависимости
+# Копирование файлов
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Скопировать остальные файлы
+# Копирование всех исходников
 COPY . .
 
-# Установить порт
+# Установка порта
 ENV PORT=8080
 
 # Запуск приложения
