@@ -67,7 +67,7 @@ async def handle_webhook(request):
 async def analyze_file():
     try:
         # Ссылка на файл на Яндекс.Диске
-        file_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
+        file_url = "https://disk.yandex.ru/i/5t9-Cg1G3Q76sw"
         save_path = "downloaded_file.xlsx"
 
         # Преобразование ссылки в прямую
