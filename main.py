@@ -7,6 +7,11 @@ import aiohttp
 import pandas as pd
 from pydub import AudioSegment
 from asyncio import Event
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Загрузка переменных окружения из .env файла
 load_dotenv()
@@ -40,7 +45,7 @@ async def handle_home(request):
 async def handle_webhook(request):
     try:
         data = await request.json()
-        print(f"Получены данные от Telegram: {data}")
+        logger.info(f"Получены данные от Telegram: {data}")
 
         if "message" in data:
             chat_id = data["message"]["chat"]["id"]
@@ -61,56 +66,65 @@ async def handle_webhook(request):
 
         return web.json_response({"status": "ok"})
     except Exception as e:
-        print(f"Ошибка обработки вебхука: {e}")
+        logger.error(f"Ошибка обработки вебхука: {e}", exc_info=True)
         return web.json_response({"error": str(e)}, status=500)
 
 async def analyze_file():
+    save_path = "downloaded_file.xlsx"
     try:
         # Ссылка на файл на Яндекс.Диске
         file_url = "https://disk.yandex.ru/i/5t9-Cg1G3Q76sw"
-        save_path = "downloaded_file.xlsx"
 
         # Преобразование ссылки в прямую
         direct_url = f"{file_url}?export=download"
+        logger.debug(f"Скачивание файла по URL: {direct_url}")
 
         # Скачивание файла
         async with aiohttp.ClientSession() as session:
             async with session.get(direct_url) as response:
+                response.raise_for_status()
                 with open(save_path, "wb") as f:
                     f.write(await response.read())
+        logger.info("Файл успешно скачан.")
 
         # Чтение и анализ данных
         df = pd.read_excel(save_path)
         result = df.describe()  # Генерация простой статистики
+        logger.info("Анализ файла завершен.")
 
         return f"Файл успешно проанализирован:\n{result.to_string()}"
     except Exception as e:
-        print(f"Ошибка анализа файла: {e}")
+        logger.error(f"Ошибка анализа файла: {e}", exc_info=True)
         return "Не удалось обработать файл."
     finally:
         if os.path.exists(save_path):
             os.remove(save_path)
+            logger.debug("Временный файл удален.")
 
 async def analyze_file_with_query(query):
+    save_path = "downloaded_file.xlsx"
     try:
         # Ссылка на файл на Яндекс.Диске
         file_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
-        save_path = "downloaded_file.xlsx"
 
         # Преобразование ссылки в прямую
         direct_url = f"{file_url}?export=download"
+        logger.debug(f"Скачивание файла по URL: {direct_url}")
 
         # Скачивание файла
         async with aiohttp.ClientSession() as session:
             async with session.get(direct_url) as response:
+                response.raise_for_status()
                 with open(save_path, "wb") as f:
                     f.write(await response.read())
+        logger.info("Файл успешно скачан.")
 
         # Чтение данных
         df = pd.read_excel(save_path)
 
         # Проверка на наличие колонки "Цена"
         if "Цена" not in df.columns:
+            logger.warning("Колонка 'Цена' не найдена в файле.")
             return "Колонка 'Цена' не найдена в файле."
 
         # Фильтрация данных по запросу
@@ -118,16 +132,19 @@ async def analyze_file_with_query(query):
             condition = eval(f"df['Цена'] {query}")  # Пример: "< 5000000"
             filtered_data = df[condition]
             if filtered_data.empty:
+                logger.info("Не найдено записей, соответствующих запросу.")
                 return "Не найдено записей, соответствующих запросу."
             return f"Найдены цены:\n{filtered_data['Цена'].to_list()}"
         except Exception as e:
+            logger.error(f"Ошибка при обработке условия: {e}", exc_info=True)
             return f"Ошибка при обработке условия: {e}"
     except Exception as e:
-        print(f"Ошибка анализа файла: {e}")
+        logger.error(f"Ошибка анализа файла: {e}", exc_info=True)
         return "Не удалось обработать файл."
     finally:
         if os.path.exists(save_path):
             os.remove(save_path)
+            logger.debug("Временный файл удален.")
 
 async def send_message(chat_id, text):
     try:
@@ -135,10 +152,11 @@ async def send_message(chat_id, text):
         payload = {"chat_id": chat_id, "text": text}
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload) as response:
+                response.raise_for_status()
                 result = await response.json()
-                print(f"Ответ Telegram API: {result}")
+                logger.info(f"Ответ Telegram API: {result}")
     except Exception as e:
-        print(f"Ошибка при отправке сообщения: {e}")
+        logger.error(f"Ошибка при отправке сообщения: {e}", exc_info=True)
 
 async def generate_openai_response(user_message):
     try:
@@ -153,7 +171,7 @@ async def generate_openai_response(user_message):
         )
         return response['choices'][0]['message']['content']
     except Exception as e:
-        print(f"Ошибка при обращении к OpenAI: {e}")
+        logger.error(f"Ошибка при обращении к OpenAI: {e}", exc_info=True)
         return "Произошла ошибка при генерации ответа."
 
 # Роуты приложения
@@ -162,4 +180,5 @@ app.router.add_post('/webhook', handle_webhook)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
+    logger.info(f"Запуск приложения на порту {port}")
     web.run_app(app, host="0.0.0.0", port=port)
