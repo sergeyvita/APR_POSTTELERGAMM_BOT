@@ -102,6 +102,8 @@ async def analyze_file():
 
         # Чтение и анализ данных
         df = pd.read_excel(save_path)
+        logger.debug(f"Содержимое файла (первые строки):\n{df.head()}")
+        logger.debug(f"Колонки в файле: {df.columns}")
         result = df.describe()  # Генерация простой статистики
         logger.info("Анализ файла завершен.")
 
@@ -114,56 +116,11 @@ async def analyze_file():
             os.remove(save_path)
             logger.debug("Временный файл удален.")
 
-async def analyze_file_with_query(query):
-    save_path = "downloaded_file.xlsx"
-    try:
-        # Ссылка на публичный файл на Яндекс.Диске
-        public_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
-
-        # Получение прямой ссылки для скачивания
-        download_url = await get_download_link(public_url)
-        if not download_url:
-            return "Не удалось получить прямую ссылку на файл."
-
-        # Скачивание файла
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url) as response:
-                response.raise_for_status()
-                with open(save_path, "wb") as f:
-                    f.write(await response.read())
-        logger.info("Файл успешно скачан.")
-
-        # Чтение данных
-        df = pd.read_excel(save_path)
-
-        # Проверка на наличие колонки "Цена"
-        if "Цена" not in df.columns:
-            logger.warning("Колонка 'Цена' не найдена в файле.")
-            return "Колонка 'Цена' не найдена в файле."
-
-        # Фильтрация данных по запросу
-        try:
-            condition = eval(f"df['Цена'] {query}")  # Пример: "< 5000000"
-            filtered_data = df[condition]
-            if filtered_data.empty:
-                logger.info("Не найдено записей, соответствующих запросу.")
-                return "Не найдено записей, соответствующих запросу."
-            return f"Найдены цены:\n{filtered_data['Цена'].to_list()}"
-        except Exception as e:
-            logger.error(f"Ошибка при обработке условия: {e}", exc_info=True)
-            return f"Ошибка при обработке условия: {e}"
-    except Exception as e:
-        logger.error(f"Ошибка анализа файла: {e}", exc_info=True)
-        return "Не удалось обработать файл."
-    finally:
-        if os.path.exists(save_path):
-            os.remove(save_path)
-            logger.debug("Временный файл удален.")
-
 async def send_message(chat_id, text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": text}
+        logger.debug(f"Отправка сообщения Telegram: {payload}")
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload) as response:
                 response.raise_for_status()
@@ -171,22 +128,6 @@ async def send_message(chat_id, text):
                 logger.info(f"Ответ Telegram API: {result}")
     except Exception as e:
         logger.error(f"Ошибка при отправке сообщения: {e}", exc_info=True)
-
-async def generate_openai_response(user_message):
-    try:
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=1,
-            max_tokens=1500,
-        )
-        return response['choices'][0]['message']['content']
-    except Exception as e:
-        logger.error(f"Ошибка при обращении к OpenAI: {e}", exc_info=True)
-        return "Произошла ошибка при генерации ответа."
 
 # Роуты приложения
 app.router.add_get('/', handle_home)
