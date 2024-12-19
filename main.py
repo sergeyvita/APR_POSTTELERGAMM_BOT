@@ -9,8 +9,8 @@ import pandas as pd
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             model="gpt-4",
             messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": user_message}],
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
         )
         reply = response.choices[0].message["content"]
         await update.message.reply_text(reply)
@@ -57,7 +57,7 @@ async def fetch_file_from_yandex_disk() -> pd.DataFrame:
         with open("data.csv", "wb") as file:
             file.write(response.content)
         logger.info("Файл успешно загружен с Яндекс.Диска.")
-        return pd.read_csv("data.csv", sep=';', encoding='utf-8')
+        return pd.read_csv("data.csv", sep=";", encoding="utf-8")
     else:
         logger.error(f"Ошибка загрузки файла: {response.status_code}, {response.text}")
         raise Exception("Не удалось загрузить файл с Яндекс.Диска.")
@@ -84,21 +84,16 @@ async def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Запуск вебхука
-    try:
-        await application.start()
-        await application.updater.start_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=TELEGRAM_BOT_TOKEN,
-            webhook_url=f"{WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}"
-        )
-        logger.info("Бот успешно запущен.")
-        await application.idle()
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
+    logger.info(f"Запуск вебхука на порту {PORT}")
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=f"/{TELEGRAM_BOT_TOKEN}",
+        webhook_url=f"{WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}",
+    )
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except RuntimeError as e:
-        logger.error(f"Ошибка выполнения asyncio: {e}")
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
