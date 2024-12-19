@@ -69,19 +69,32 @@ async def handle_webhook(request):
         logger.error(f"Ошибка обработки вебхука: {e}", exc_info=True)
         return web.json_response({"error": str(e)}, status=500)
 
+async def get_download_link(public_url):
+    try:
+        api_url = f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key={public_url}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url) as response:
+                response.raise_for_status()
+                data = await response.json()
+                return data['href']
+    except Exception as e:
+        logger.error(f"Ошибка получения ссылки на скачивание: {e}")
+        return None
+
 async def analyze_file():
     save_path = "downloaded_file.xlsx"
     try:
-        # Ссылка на файл на Яндекс.Диске
-        file_url = "https://disk.yandex.ru/i/5t9-Cg1G3Q76sw"
+        # Ссылка на публичный файл на Яндекс.Диске
+        public_url = "https://disk.yandex.ru/i/5t9-Cg1G3Q76sw"
 
-        # Преобразование ссылки в прямую
-        direct_url = f"{file_url}?export=download"
-        logger.debug(f"Скачивание файла по URL: {direct_url}")
+        # Получение прямой ссылки для скачивания
+        download_url = await get_download_link(public_url)
+        if not download_url:
+            return "Не удалось получить прямую ссылку на файл."
 
         # Скачивание файла
         async with aiohttp.ClientSession() as session:
-            async with session.get(direct_url) as response:
+            async with session.get(download_url) as response:
                 response.raise_for_status()
                 with open(save_path, "wb") as f:
                     f.write(await response.read())
@@ -104,16 +117,17 @@ async def analyze_file():
 async def analyze_file_with_query(query):
     save_path = "downloaded_file.xlsx"
     try:
-        # Ссылка на файл на Яндекс.Диске
-        file_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
+        # Ссылка на публичный файл на Яндекс.Диске
+        public_url = "https://disk.yandex.ru/i/e-AmdWzRu43L3g"
 
-        # Преобразование ссылки в прямую
-        direct_url = f"{file_url}?export=download"
-        logger.debug(f"Скачивание файла по URL: {direct_url}")
+        # Получение прямой ссылки для скачивания
+        download_url = await get_download_link(public_url)
+        if not download_url:
+            return "Не удалось получить прямую ссылку на файл."
 
         # Скачивание файла
         async with aiohttp.ClientSession() as session:
-            async with session.get(direct_url) as response:
+            async with session.get(download_url) as response:
                 response.raise_for_status()
                 with open(save_path, "wb") as f:
                     f.write(await response.read())
