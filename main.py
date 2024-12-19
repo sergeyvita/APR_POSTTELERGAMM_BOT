@@ -135,8 +135,9 @@ async def main():
 
     try:
         # Ожидание завершения
-        await application.updater.start_polling()
-        await application.idle()
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Завершение приложения...")
     finally:
         # Корректная остановка приложения
         await application.stop()
