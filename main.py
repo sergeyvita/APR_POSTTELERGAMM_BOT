@@ -2,7 +2,7 @@ import os
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from aiohttp import web
+from aiohttp import web, ClientSession
 import asyncio
 import pandas as pd
 from openai import ChatCompletion
@@ -58,7 +58,7 @@ async def download_yandex_file():
     headers = {
         'Authorization': f'OAuth {YANDEX_DISK_TOKEN}'
     }
-    async with aiohttp.ClientSession() as session:
+    async with ClientSession() as session:
         async with session.get(YANDEX_FILE_URL, headers=headers) as response:
             if response.status == 200:
                 content = await response.text()
