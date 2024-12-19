@@ -85,9 +85,12 @@ async def process_file():
         # Чтение файла
         df = pd.read_csv("data.csv", encoding="utf-8")
         logger.info(f"Файл успешно обработан. Найдено строк: {len(df)}")
-        # Пример анализа данных
-        summary = df.describe(include='all')  # Статистика по данным
-        return summary.to_string()
+        # Предположим, что столбец с ценами называется "Цена"
+        if "Цена" in df.columns:
+            min_price = df["Цена"].min()
+            return f"Минимальная цена в файле: {min_price}"
+        else:
+            return "В файле не найден столбец 'Цена'. Проверьте формат файла."
     except Exception as e:
         logger.error(f"Ошибка обработки файла: {e}")
         return "Произошла ошибка при обработке файла."
@@ -96,6 +99,11 @@ async def process_file():
 async def analyze_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = await process_file()
     await update.message.reply_text(f"Анализ файла завершен:\n{result}")
+
+# Команда для получения минимальной цены
+async def get_min_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = await process_file()
+    await update.message.reply_text(result)
 
 # Вебхуковый маршрут
 async def webhook_handler(request):
@@ -116,6 +124,7 @@ async def main():
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("analyze", analyze_data))
+    application.add_handler(CommandHandler("min_price", get_min_price))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Настройка вебхуков
