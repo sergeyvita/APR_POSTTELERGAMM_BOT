@@ -1,146 +1,125 @@
-import os
-import asyncio
-from aiohttp import web
-from dotenv import load_dotenv
-import openai
-import aiohttp
-import pandas as pd
-from pandas_profiling import ProfileReport
-from asyncio import Event
 import logging
+import os
+from dotenv import load_dotenv
+from telegram import Bot, Update, Voice
+from telegram.ext import CommandHandler, MessageHandler, Filters, Updater, CallbackContext
+import openai
+import requests
+import pandas as pd
+from io import StringIO
 
-# Настройка логирования
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Загрузка переменных окружения из .env файла
+# Загрузка переменных окружения
 load_dotenv()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+YANDEX_DISK_TOKEN = os.getenv("YANDEX_DISK_TOKEN")
+YANDEX_FILE_URL = os.getenv("YANDEX_FILE_URL")  # Ссылка на файл
 
-# Переменные окружения
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-
-# Установка API-ключа OpenAI
 openai.api_key = OPENAI_API_KEY
 
-# PROMPT для OpenAI
-PROMPT = (
-    "Этот GPT выступает в роли профессионального создателя контента для Телеграм-канала Ассоциации застройщиков. "
-    "Он создает максимально продающие посты на темы недвижимости, строительства, законодательства, инвестиций и связанных отраслей. "
-    "Контент ориентирован на привлечение внимания, удержание аудитории и стимулирование действий (например, обращения за консультацией или покупки). "
-    "Посты красиво оформляются с использованием эмодзи в стиле \"энергичный и современный\", добавляя динамичности и вовлеченности. "
-    "Например: 🏠 для темы недвижимости, 🚀 для роста, 📢 для новостей. "
-    "Все посты структурированные и содержат четкие призывы к действию, информацию о контактах и гиперссылки. "
-    "В конце каждого поста перед хэштегами указывается название компании \"Ассоциация застройщиков\", номер телефона 8-800-550-23-93. "
-    "В конце хэштеги на тему поста."
+# Логирование
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
+logger = logging.getLogger(__name__)
 
-# Создание приложения Aiohttp
-app = web.Application()
+# PROMPT для GPT-4
+PROMPT = """
+You are a GPT-4 assistant integrated with a Telegram bot. Your job is to handle user queries effectively. Use the context provided in the uploaded files and conversations.
+"""
 
-async def handle_home(request):
-    return web.Response(text="Сервис работает!")
+# Загрузка файла с Яндекс.Диска
+def download_file_from_yandex_disk(file_url: str, token: str) -> pd.DataFrame:
+    headers = {"Authorization": f"OAuth {token}"}
+    response = requests.get(file_url, headers=headers)
+    if response.status_code == 200:
+        logger.info("Файл успешно загружен с Яндекс.Диска")
+        content = StringIO(response.text)
+        return pd.read_csv(content, sep=";")
+    else:
+        logger.error(f"Ошибка загрузки файла: {response.status_code} - {response.text}")
+        raise Exception("Не удалось загрузить файл с Яндекс.Диска.")
 
-async def handle_webhook(request):
+# Обработчик команды /start
+def start(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text("Добро пожаловать! Отправьте мне запрос или голосовое сообщение.")
+
+# Обработка текстовых сообщений
+def handle_message(update: Update, context: CallbackContext) -> None:
+    user_message = update.message.text
+    logger.info(f"Получено сообщение: {user_message}")
     try:
-        data = await request.json()
-        logger.info(f"Получены данные от Telegram: {data}")
-
-        if "message" in data:
-            chat_id = data["message"]["chat"]["id"]
-
-            if "text" in data["message"]:
-                user_message = data["message"]["text"]
-
-                if user_message.lower() == "/analyze_file":
-                    response = await analyze_file()
-                    await send_message(chat_id, response)
-                elif user_message.lower().startswith("/find_price"):
-                    query = user_message.replace("/find_price", "").strip()
-                    response = await analyze_file_with_query(query)
-                    await send_message(chat_id, response)
-                else:
-                    response = await generate_openai_response(user_message)
-                    await send_message(chat_id, response)
-
-        return web.json_response({"status": "ok"})
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.7,
+            max_tokens=500,
+        )
+        bot_response = response["choices"][0]["message"]["content"]
+        update.message.reply_text(bot_response)
     except Exception as e:
-        logger.error(f"Ошибка обработки вебхука: {e}", exc_info=True)
-        return web.json_response({"error": str(e)}, status=500)
+        logger.error(f"Ошибка обработки запроса OpenAI: {e}")
+        update.message.reply_text("Произошла ошибка при обработке вашего запроса.")
 
-async def get_download_link(public_url):
+# Обработка голосовых сообщений
+def handle_voice_message(update: Update, context: CallbackContext) -> None:
+    voice: Voice = update.message.voice
+    file = voice.get_file()
+    logger.info("Голосовое сообщение получено и обрабатывается.")
     try:
-        api_url = f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key={public_url}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return data['href']
-    except Exception as e:
-        logger.error(f"Ошибка получения ссылки на скачивание: {e}")
-        return None
+        # Скачивание голосового файла
+        file_path = file.download()
+        # Преобразование голосового сообщения в текст
+        # Для примера, здесь стоит интеграция с библиотекой распознавания речи
+        text = "Тестовое распознавание текста из голосового сообщения."
+        logger.info(f"Распознанный текст: {text}")
 
-async def analyze_file():
-    save_path = "downloaded_file.csv"
+        # Отправка распознанного текста в OpenAI
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": PROMPT},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.7,
+            max_tokens=500,
+        )
+        bot_response = response["choices"][0]["message"]["content"]
+        update.message.reply_text(bot_response)
+    except Exception as e:
+        logger.error(f"Ошибка обработки голосового сообщения: {e}")
+        update.message.reply_text("Ошибка обработки голосового сообщения.")
+
+# Загрузка файла данных по запросу
+def handle_file_request(update: Update, context: CallbackContext) -> None:
     try:
-        # Ссылка на публичный файл на Яндекс.Диске
-        public_url = "https://disk.yandex.ru/d/zMQIU1d2V3Lx5A"
-
-        # Получение прямой ссылки для скачивания
-        download_url = await get_download_link(public_url)
-        if not download_url:
-            return "Не удалось получить прямую ссылку на файл."
-
-        # Скачивание файла
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url) as response:
-                response.raise_for_status()
-                with open(save_path, "wb") as f:
-                    f.write(await response.read())
-        logger.info("Файл успешно скачан.")
-
-        # Чтение файла с фильтрацией столбцов
-        use_columns = [col for col in [
-            "Название объекта", "Цена", "Этаж", "Общая площадь", "Количество комнат"
-        ] if col]
-        df = pd.read_csv(save_path, sep=';', usecols=use_columns, encoding='utf-8')
-        logger.debug(f"Колонки в файле: {df.columns}")
-
-        # Профилирование данных (опционально для анализа)
-        profile = ProfileReport(df, title="Отчет по данным")
-        profile.to_file("profile_report.html")
-
-        result = df.describe()  # Генерация простой статистики
-        logger.info("Анализ файла завершен.")
-
-        return f"Файл успешно проанализирован:\n{result.to_string()}"
+        data = download_file_from_yandex_disk(YANDEX_FILE_URL, YANDEX_DISK_TOKEN)
+        logger.info("Файл успешно загружен и обработан.")
+        update.message.reply_text("Файл загружен. Что вы хотите с ним сделать?")
     except Exception as e:
-        logger.error(f"Ошибка анализа файла: {e}", exc_info=True)
-        return "Не удалось обработать файл."
-    finally:
-        if os.path.exists(save_path):
-            os.remove(save_path)
-            logger.debug("Временный файл удален.")
+        logger.error(f"Ошибка загрузки файла: {e}")
+        update.message.reply_text("Ошибка загрузки файла.")
 
-async def send_message(chat_id, text):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text}
-        logger.debug(f"Отправка сообщения Telegram: {payload}")
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as response:
-                response.raise_for_status()
-                result = await response.json()
-                logger.info(f"Ответ Telegram API: {result}")
-    except Exception as e:
-        logger.error(f"Ошибка при отправке сообщения: {e}", exc_info=True)
+def main() -> None:
+    # Настройка Telegram-бота
+    updater = Updater(token=TELEGRAM_TOKEN)
+    dispatcher = updater.dispatcher
 
-# Роуты приложения
-app.router.add_get('/', handle_home)
-app.router.add_post('/webhook', handle_webhook)
+    # Обработчики
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dispatcher.add_handler(MessageHandler(Filters.voice, handle_voice_message))
+    dispatcher.add_handler(CommandHandler("file", handle_file_request))
+
+    # Запуск бота
+    port = int(os.environ.get("PORT", 8080))
+    updater.start_polling()
+    logger.info(f"Бот запущен на порту {port}")
+    updater.idle()
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    logger.info(f"Запуск приложения на порту {port}")
-    web.run_app(app, host="0.0.0.0", port=port)
+    main()
