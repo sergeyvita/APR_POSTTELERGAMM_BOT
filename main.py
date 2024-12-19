@@ -54,6 +54,8 @@ IGNORE_COLUMNS = [
     "Картинка для анонса", "Доп фото", "Позиция в шахматке", "Жилой комплекс", "Путь до картинок"
 ]
 
+shutdown_event = asyncio.Event()
+
 # Загрузка данных с Яндекс.Диска
 async def download_yandex_file():
     public_url = YANDEX_FILE_URL
@@ -208,41 +210,39 @@ async def webhook_handler(request):
 async def main():
     global application
 
-    # Инициализация приложения Telegram
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    await application.initialize()  # Инициализация приложения
-    await application.start()  # Запуск приложения
+    await application.initialize()
+    await application.start()
 
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_user_query))
 
-    # Настройка вебхуков
+    # Веб-сервер
     app = web.Application()
     app.router.add_post("/webhook", webhook_handler)
 
-    # Запуск веб-сервера
     try:
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", PORT)
         await site.start()
         logger.info(f"Сервер запущен и слушает порт {PORT}")
+
+        # Загрузка данных
+        await download_yandex_file()
+
+        await shutdown_event.wait()
     except Exception as e:
-        logger.error(f"Ошибка запуска сервера: {e}")
-
-    # Загрузка файла с Яндекс.Диска
-    await download_yandex_file()
-
-    try:
-        # Ожидание завершения
-        await asyncio.Event().wait()
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Завершение приложения...")
+        logger.error(f"Ошибка в основном цикле: {e}")
     finally:
-        # Корректная остановка приложения
         await application.stop()
         await runner.cleanup()
+        logger.info("Приложение завершено корректно")
+
+# Для управления остановкой
+def signal_handler(*_):
+    shutdown_event.set()
 
 if __name__ == "__main__":
     try:
