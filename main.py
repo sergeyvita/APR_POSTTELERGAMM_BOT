@@ -133,8 +133,14 @@ async def main():
     # Загрузка файла с Яндекс.Диска
     await download_yandex_file()
 
-    # Ожидание завершения
-    await application.idle()
+    try:
+        # Ожидание завершения
+        await application.updater.start_polling()
+        await application.idle()
+    finally:
+        # Корректная остановка приложения
+        await application.stop()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     try:
