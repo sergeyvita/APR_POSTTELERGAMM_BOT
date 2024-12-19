@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import openai
 import aiohttp
 import pandas as pd
-from pydub import AudioSegment
+from pandas_profiling import ProfileReport
 from asyncio import Event
 import logging
 
@@ -82,10 +82,10 @@ async def get_download_link(public_url):
         return None
 
 async def analyze_file():
-    save_path = "downloaded_file.xlsx"
+    save_path = "downloaded_file.csv"
     try:
         # Ссылка на публичный файл на Яндекс.Диске
-        public_url = "https://disk.yandex.ru/i/5t9-Cg1G3Q76sw"
+        public_url = "https://disk.yandex.ru/d/zMQIU1d2V3Lx5A"
 
         # Получение прямой ссылки для скачивания
         download_url = await get_download_link(public_url)
@@ -100,10 +100,17 @@ async def analyze_file():
                     f.write(await response.read())
         logger.info("Файл успешно скачан.")
 
-        # Чтение и анализ данных
-        df = pd.read_excel(save_path)
-        logger.debug(f"Содержимое файла (первые строки):\n{df.head()}")
+        # Чтение файла с фильтрацией столбцов
+        use_columns = [col for col in [
+            "Название объекта", "Цена", "Этаж", "Общая площадь", "Количество комнат"
+        ] if col]
+        df = pd.read_csv(save_path, sep=';', usecols=use_columns, encoding='utf-8')
         logger.debug(f"Колонки в файле: {df.columns}")
+
+        # Профилирование данных (опционально для анализа)
+        profile = ProfileReport(df, title="Отчет по данным")
+        profile.to_file("profile_report.html")
+
         result = df.describe()  # Генерация простой статистики
         logger.info("Анализ файла завершен.")
 
