@@ -72,7 +72,7 @@ async def analyze_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error(f"Ошибка анализа файла: {e}")
         await update.message.reply_text("Не удалось выполнить анализ файла.")
 
-async def main() -> None:
+def main() -> None:
     """Основная функция для запуска бота."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -85,7 +85,7 @@ async def main() -> None:
 
     # Запуск вебхука
     logger.info(f"Запуск вебхука на порту {PORT}")
-    await application.run_webhook(
+    application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=f"/{TELEGRAM_BOT_TOKEN}",
@@ -94,6 +94,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
