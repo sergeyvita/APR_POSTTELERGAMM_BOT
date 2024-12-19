@@ -1,125 +1,93 @@
-import logging
 import os
-from dotenv import load_dotenv
-from telegram import Bot, Update, Voice
-from telegram.ext import CommandHandler, MessageHandler, Filters, Updater, CallbackContext
-import openai
+import logging
+from telegram import Update
+from telegram.ext import (Updater, CommandHandler, MessageHandler, 
+                          CallbackContext, ApplicationBuilder, filters)
+from openai import ChatCompletion
+from pydub import AudioSegment
 import requests
-import pandas as pd
-from io import StringIO
+from io import BytesIO
 
-# Загрузка переменных окружения
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-YANDEX_DISK_TOKEN = os.getenv("YANDEX_DISK_TOKEN")
-YANDEX_FILE_URL = os.getenv("YANDEX_FILE_URL")  # Ссылка на файл
-
-openai.api_key = OPENAI_API_KEY
-
-# Логирование
+# Настройка логирования
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# PROMPT для GPT-4
-PROMPT = """
-You are a GPT-4 assistant integrated with a Telegram bot. Your job is to handle user queries effectively. Use the context provided in the uploaded files and conversations.
-"""
+# Переменные среды
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+YANDEX_DISK_TOKEN = os.getenv("YANDEX_DISK_TOKEN")
+YANDEX_FILE_URL = os.getenv("YANDEX_FILE_URL")
+PORT = int(os.getenv("PORT", "8080"))
 
-# Загрузка файла с Яндекс.Диска
-def download_file_from_yandex_disk(file_url: str, token: str) -> pd.DataFrame:
-    headers = {"Authorization": f"OAuth {token}"}
-    response = requests.get(file_url, headers=headers)
-    if response.status_code == 200:
-        logger.info("Файл успешно загружен с Яндекс.Диска")
-        content = StringIO(response.text)
-        return pd.read_csv(content, sep=";")
-    else:
-        logger.error(f"Ошибка загрузки файла: {response.status_code} - {response.text}")
-        raise Exception("Не удалось загрузить файл с Яндекс.Диска.")
+# Настройки OpenAI GPT-4
+PROMPT = "Вы являетесь ботом-помощником. Отвечайте на вопросы лаконично и понятно."
 
-# Обработчик команды /start
-def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text("Добро пожаловать! Отправьте мне запрос или голосовое сообщение.")
+# Инициализация OpenAI
+chat = ChatCompletion(api_key=OPENAI_API_KEY)
 
-# Обработка текстовых сообщений
-def handle_message(update: Update, context: CallbackContext) -> None:
+# Функция обработки команды /start
+async def start(update: Update, context: CallbackContext):
+    await update.message.reply_text("Привет! Я бот, готов помочь. Отправьте текст или голосовое сообщение.")
+
+# Функция обработки текстовых сообщений
+async def handle_message(update: Update, context: CallbackContext):
     user_message = update.message.text
     logger.info(f"Получено сообщение: {user_message}")
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.7,
-            max_tokens=500,
-        )
-        bot_response = response["choices"][0]["message"]["content"]
-        update.message.reply_text(bot_response)
-    except Exception as e:
-        logger.error(f"Ошибка обработки запроса OpenAI: {e}")
-        update.message.reply_text("Произошла ошибка при обработке вашего запроса.")
 
-# Обработка голосовых сообщений
-def handle_voice_message(update: Update, context: CallbackContext) -> None:
-    voice: Voice = update.message.voice
-    file = voice.get_file()
-    logger.info("Голосовое сообщение получено и обрабатывается.")
-    try:
-        # Скачивание голосового файла
-        file_path = file.download()
-        # Преобразование голосового сообщения в текст
-        # Для примера, здесь стоит интеграция с библиотекой распознавания речи
-        text = "Тестовое распознавание текста из голосового сообщения."
-        logger.info(f"Распознанный текст: {text}")
+    response = chat.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": user_message}],
+        temperature=0.7,
+        max_tokens=1500
+    )
+    reply = response['choices'][0]['message']['content']
+    await update.message.reply_text(reply)
 
-        # Отправка распознанного текста в OpenAI
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": PROMPT},
-                {"role": "user", "content": text},
-            ],
-            temperature=0.7,
-            max_tokens=500,
-        )
-        bot_response = response["choices"][0]["message"]["content"]
-        update.message.reply_text(bot_response)
-    except Exception as e:
-        logger.error(f"Ошибка обработки голосового сообщения: {e}")
-        update.message.reply_text("Ошибка обработки голосового сообщения.")
+# Функция обработки голосовых сообщений
+async def handle_voice(update: Update, context: CallbackContext):
+    file_id = update.message.voice.file_id
+    file = await context.bot.get_file(file_id)
+    file_bytes = requests.get(file.file_path).content
 
-# Загрузка файла данных по запросу
-def handle_file_request(update: Update, context: CallbackContext) -> None:
-    try:
-        data = download_file_from_yandex_disk(YANDEX_FILE_URL, YANDEX_DISK_TOKEN)
-        logger.info("Файл успешно загружен и обработан.")
-        update.message.reply_text("Файл загружен. Что вы хотите с ним сделать?")
-    except Exception as e:
-        logger.error(f"Ошибка загрузки файла: {e}")
-        update.message.reply_text("Ошибка загрузки файла.")
+    audio = AudioSegment.from_file(BytesIO(file_bytes))
+    audio.export("voice.ogg", format="ogg")
 
-def main() -> None:
-    # Настройка Telegram-бота
-    updater = Updater(token=TELEGRAM_TOKEN)
-    dispatcher = updater.dispatcher
+    response = chat.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": "[Голосовое сообщение]"}],
+        temperature=0.7,
+        max_tokens=1500
+    )
+    reply = response['choices'][0]['message']['content']
+    await update.message.reply_text(reply)
 
-    # Обработчики
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-    dispatcher.add_handler(MessageHandler(Filters.voice, handle_voice_message))
-    dispatcher.add_handler(CommandHandler("file", handle_file_request))
+# Функция загрузки файла с Яндекс.Диска
+async def load_yandex_file():
+    headers = {"Authorization": f"OAuth {YANDEX_DISK_TOKEN}"}
+    response = requests.get(YANDEX_FILE_URL, headers=headers)
 
-    # Запуск бота
-    port = int(os.environ.get("PORT", 8080))
-    updater.start_polling()
-    logger.info(f"Бот запущен на порту {port}")
-    updater.idle()
+    if response.status_code == 200:
+        logger.info("Файл успешно загружен с Яндекс.Диска.")
+        return response.content
+    else:
+        logger.error(f"Ошибка загрузки файла: {response.status_code}")
+        return None
+
+# Основная функция запуска бота
+async def main():
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
+
+    logger.info(f"Бот запущен на порту {PORT}")
+    await application.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
