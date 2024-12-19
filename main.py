@@ -222,12 +222,14 @@ async def main():
     app.router.add_post("/webhook", webhook_handler)
 
     # Запуск веб-сервера
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-
-    logger.info(f"Запуск вебхука на порту {PORT}")
+    try:
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", PORT)
+        await site.start()
+        logger.info(f"Сервер запущен и слушает порт {PORT}")
+    except Exception as e:
+        logger.error(f"Ошибка запуска сервера: {e}")
 
     # Загрузка файла с Яндекс.Диска
     await download_yandex_file()
