@@ -25,56 +25,61 @@ PORT = int(os.getenv("PORT", "8080"))
 # Инициализация OpenAI
 chat = ChatCompletion(api_key=OPENAI_API_KEY)
 
-# Описание столбцов файла
-COLUMN_MAPPING = {
-    "Жилой комплекс Раздел 1": "Название ЖК",
-    "Город": "Город",
-    "Литер Раздел 2": "Номер литера",
-    "Подъезд Раздел 3": "Номер подъезда",
-    "Этаж": "Номер этажа",
-    "Номер квартиры": "Номер квартиры",
-    "Цена": "Цена без скидок",
-    "Цена со скидкой": "Цена со скидкой",
-    "Цена за м2": "Цена за м2",
-    "Цена за кв.м. со скидкой": "Цена за м2 со скидкой",
-    "Комнат": "Количество комнат",
-    "Площадь": "Общая площадь",
-    "Продано": "Продано",
-    "Бронь": "Бронь",
-    "Акция": "Акция",
-    "ДКП": "Договор купли-продажи",
-    "Очередь": "Очередь строительства",
-    "Литер": "Литер",
-    "Подъезд": "Подъезд",
-    "Дата обновления": "Дата обновления"
-}
+# Глобальный кэш для данных
+cached_df = None
 
-IGNORE_COLUMNS = [
-    "Картинка для анонса", "Доп фото", "Позиция в шахматке", "Жилой комплекс", "Путь до картинок"
-]
+# Загрузка данных с файла
+def load_file():
+    global cached_df
+    if cached_df is None:
+        cached_df = pd.read_csv("data.csv", encoding="utf-8", sep=";", on_bad_lines="skip", low_memory=False)
+        cached_df["Комнат"] = pd.to_numeric(cached_df["Комнат"], errors="coerce")
+        cached_df["Площадь"] = pd.to_numeric(cached_df["Площадь"], errors="coerce")
+        cached_df["Цена"] = pd.to_numeric(cached_df["Цена"], errors="coerce")
+    return cached_df
 
 # Стартовая команда
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Привет! Я бот, который анализирует данные из файла на Яндекс.Диске.")
 
-# Обработка текстовых сообщений
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Обработка текстового запроса пользователя
+async def process_user_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
-    logger.info(f"Получено сообщение: {user_message}")
 
     try:
+        # Загрузка данных
+        df = load_file()
+
+        # Извлечение критериев из запроса
+        if "1 комнатная" in user_message and "43 квадратных" in user_message:
+            filtered_df = df[(df["Комнат"] == 1) & (df["Площадь"].between(42, 44))]
+        else:
+            await update.message.reply_text("Не удалось понять ваш запрос. Уточните, пожалуйста.")
+            return
+
+        # Формируем текст для OpenAI
+        if not filtered_df.empty:
+            data_summary = filtered_df[["Жилой комплекс Раздел 1", "Площадь", "Цена"]].to_string(index=False)
+            prompt = (
+                f"Вот данные о квартирах:\n{data_summary}\n"
+                f"На основе этих данных, ответьте на запрос пользователя: {user_message}"
+            )
+        else:
+            prompt = f"На основе данных в файле не найдено подходящих квартир. Запрос: {user_message}"
+
+        # Отправка запроса в OpenAI
         response = chat.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "Вы бот, отвечающий на вопросы лаконично и четко."},
-                {"role": "user", "content": user_message}
+                {"role": "system", "content": "Вы помощник по анализу недвижимости."},
+                {"role": "user", "content": prompt}
             ]
         )
         answer = response['choices'][0]['message']['content']
         await update.message.reply_text(answer)
     except Exception as e:
-        logger.error(f"Ошибка обработки сообщения: {e}")
-        await update.message.reply_text("Произошла ошибка при обработке вашего сообщения.")
+        logger.error(f"Ошибка обработки запроса: {e}")
+        await update.message.reply_text("Произошла ошибка при обработке данных.")
 
 # Загрузка данных с Яндекс.Диска
 async def download_yandex_file():
@@ -107,38 +112,6 @@ async def download_yandex_file():
     except Exception as e:
         logger.error(f"Ошибка при загрузке файла: {e}")
 
-# Обработка файла
-async def process_file():
-    try:
-        # Чтение файла
-        df = pd.read_csv("data.csv", encoding="utf-8")
-        logger.info(f"Файл успешно обработан. Найдено строк: {len(df)}")
-        logger.info(f"Колонки файла: {df.columns.tolist()}")  # Лог колонок
-
-        # Удаление игнорируемых столбцов
-        df = df.drop(columns=[col for col in IGNORE_COLUMNS if col in df.columns], errors='ignore')
-
-        # Проверка наличия столбца "Цена"
-        if "Цена" in df.columns:
-            min_price = df["Цена"].min()
-            return f"Минимальная цена в файле: {min_price}"
-        else:
-            logger.error("Столбец 'Цена' отсутствует в файле.")
-            return "В файле не найден столбец 'Цена'. Проверьте формат файла."
-    except Exception as e:
-        logger.error(f"Ошибка обработки файла: {e}")
-        return "Произошла ошибка при обработке файла."
-
-# Команда для анализа данных
-async def analyze_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = await process_file()
-    await update.message.reply_text(f"Анализ файла завершен:\n{result}")
-
-# Команда для получения минимальной цены
-async def get_min_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = await process_file()
-    await update.message.reply_text(result)
-
 # Вебхуковый маршрут
 async def webhook_handler(request):
     update_data = await request.json()
@@ -157,9 +130,7 @@ async def main():
 
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("analyze", analyze_data))
-    application.add_handler(CommandHandler("min_price", get_min_price))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_user_query))
 
     # Настройка вебхуков
     app = web.Application()
