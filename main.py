@@ -54,6 +54,35 @@ IGNORE_COLUMNS = [
     "Картинка для анонса", "Доп фото", "Позиция в шахматке", "Жилой комплекс", "Путь до картинок"
 ]
 
+# Загрузка данных с Яндекс.Диска
+async def download_yandex_file():
+    public_url = YANDEX_FILE_URL
+    headers = {
+        'Authorization': f'OAuth {YANDEX_DISK_TOKEN}'
+    }
+    try:
+        async with ClientSession() as session:
+            async with session.get(
+                f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key={public_url}",
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    direct_link = data.get("href")
+                    if direct_link:
+                        async with session.get(direct_link) as file_response:
+                            if file_response.status == 200:
+                                content = await file_response.text()
+                                with open("data.csv", "w", encoding="utf-8") as f:
+                                    f.write(content)
+                                logger.info("Файл успешно загружен с Яндекс.Диска.")
+                            else:
+                                logger.error(f"Ошибка загрузки файла: {file_response.status}")
+                else:
+                    logger.error(f"Ошибка получения прямой ссылки: {response.status}")
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке файла: {e}")
+
 # Парсер текстовых запросов
 def parse_user_query(query):
     criteria = {
