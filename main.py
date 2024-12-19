@@ -1,11 +1,11 @@
 import os
 import logging
+import pandas as pd
+from aiohttp import web, ClientSession
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from aiohttp import web, ClientSession
-import asyncio
-import pandas as pd
 from openai import ChatCompletion
+import asyncio
 
 # Настройка логирования
 logging.basicConfig(
@@ -37,8 +37,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         response = chat.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "Вы бот, отвечающий на вопросы лаконично и четко."},
-                      {"role": "user", "content": user_message}]
+            messages=[
+                {"role": "system", "content": "Вы бот, отвечающий на вопросы лаконично и четко."},
+                {"role": "user", "content": user_message}
+            ]
         )
         answer = response['choices'][0]['message']['content']
         await update.message.reply_text(answer)
@@ -46,36 +48,72 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error(f"Ошибка обработки сообщения: {e}")
         await update.message.reply_text("Произошла ошибка при обработке вашего сообщения.")
 
-# Вебхуковый маршрут
-async def webhook_handler(request):
-    update_data = await request.json()
-    update = Update.de_json(update_data, bot)
-    await application.update_queue.put(update)
-    return web.Response(text="OK")
-
 # Загрузка данных с Яндекс.Диска
 async def download_yandex_file():
+    public_url = YANDEX_FILE_URL
     headers = {
         'Authorization': f'OAuth {YANDEX_DISK_TOKEN}'
     }
-    async with ClientSession() as session:
-        async with session.get(YANDEX_FILE_URL, headers=headers) as response:
-            if response.status == 200:
-                content = await response.text()
-                with open("data.csv", "w", encoding="utf-8") as f:
-                    f.write(content)
-                logger.info("Файл успешно загружен с Яндекс.Диска.")
-            else:
-                logger.error(f"Ошибка загрузки файла с Яндекс.Диска: {response.status}")
+    try:
+        # Запрос прямой ссылки
+        async with ClientSession() as session:
+            async with session.get(
+                f"https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key={public_url}",
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    direct_link = data.get("href")
+                    if direct_link:
+                        # Загрузка файла
+                        async with session.get(direct_link) as file_response:
+                            if file_response.status == 200:
+                                content = await file_response.text()
+                                with open("data.csv", "w", encoding="utf-8") as f:
+                                    f.write(content)
+                                logger.info("Файл успешно загружен с Яндекс.Диска.")
+                            else:
+                                logger.error(f"Ошибка загрузки файла: {file_response.status}")
+                else:
+                    logger.error(f"Ошибка получения прямой ссылки: {response.status}")
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке файла: {e}")
+
+# Обработка файла
+async def process_file():
+    try:
+        # Чтение файла
+        df = pd.read_csv("data.csv", encoding="utf-8")
+        logger.info(f"Файл успешно обработан. Найдено строк: {len(df)}")
+        # Пример анализа данных
+        summary = df.describe(include='all')  # Статистика по данным
+        return summary.to_string()
+    except Exception as e:
+        logger.error(f"Ошибка обработки файла: {e}")
+        return "Произошла ошибка при обработке файла."
+
+# Команда для анализа данных
+async def analyze_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = await process_file()
+    await update.message.reply_text(f"Анализ файла завершен:\n{result}")
+
+# Вебхуковый маршрут
+async def webhook_handler(request):
+    update_data = await request.json()
+    update = Update.de_json(update_data, application.bot)
+    await application.update_queue.put(update)
+    return web.Response(text="OK")
 
 # Основной процесс
 async def main():
     global application
 
+    # Инициализация приложения
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Обработчики
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("analyze", analyze_data))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Настройка вебхука
