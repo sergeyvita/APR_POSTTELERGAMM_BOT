@@ -1,7 +1,10 @@
+# Использование Python 3.11 в качестве базового образа
 FROM python:3.11-slim
 
 # Установка системных зависимостей
-RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Создание рабочей директории
 WORKDIR /app
@@ -10,15 +13,18 @@ WORKDIR /app
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Копирование файлов
+# Копирование файла зависимостей
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Копирование всех исходников
+# Установка Python-зависимостей
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Копирование всех исходников проекта
 COPY . .
 
-# Установка порта
+# Установка переменной среды для порта
 ENV PORT=8080
 
-# Запуск приложения
+# Указание команды для запуска приложения
 CMD ["python", "main.py"]
