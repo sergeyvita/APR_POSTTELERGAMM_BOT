@@ -108,18 +108,21 @@ async def webhook_handler(request):
 async def main():
     global application
 
-    # Инициализация приложения
+    # Инициализация приложения Telegram
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    await application.initialize()  # Инициализация приложения
+    await application.start()  # Запуск приложения
 
-    # Обработчики
+    # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("analyze", analyze_data))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Настройка вебхука
+    # Настройка вебхуков
     app = web.Application()
     app.router.add_post("/webhook", webhook_handler)
 
+    # Запуск веб-сервера
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
@@ -130,9 +133,7 @@ async def main():
     # Загрузка файла с Яндекс.Диска
     await download_yandex_file()
 
-    # Запуск бота
-    await application.start()
-    await application.updater.start_polling()
+    # Ожидание завершения
     await application.idle()
 
 if __name__ == "__main__":
