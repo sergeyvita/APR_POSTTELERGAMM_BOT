@@ -2,15 +2,15 @@ import os
 import logging
 import asyncio
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import ChatCompletion
 import requests
 import pandas as pd
 
 # Настройка логирования
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -26,74 +26,79 @@ PORT = int(os.getenv("PORT", "8080"))
 PROMPT = "Вы являетесь ботом-помощником. Отвечайте на вопросы лаконично и понятно."
 chat = ChatCompletion(api_key=OPENAI_API_KEY)
 
-async def start(update: Update, context: CallbackContext):
-    """Обработка команды /start."""
-    await update.message.reply_text("Привет! Я бот-помощник. Чем могу помочь?")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Отправляет сообщение при вводе команды /start."""
+    await update.message.reply_text("Привет! Я ваш бот-помощник. Чем могу помочь?")
 
-async def handle_text(update: Update, context: CallbackContext):
-    """Обработка текстовых сообщений."""
-    user_input = update.message.text
-    logger.info(f"Получено сообщение от пользователя: {user_input}")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает текстовые сообщения."""
+    user_message = update.message.text
+    logger.info(f"Получено сообщение от пользователя: {user_message}")
 
-    # Обработка текста через GPT-4
     try:
         response = chat.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": PROMPT},
-                {"role": "user", "content": user_input},
-            ],
-            temperature=0.7,
+            messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": user_message}],
+            max_tokens=100,
+            temperature=0.7
         )
-        bot_response = response["choices"][0]["message"]["content"]
-        await update.message.reply_text(bot_response)
+        reply = response.choices[0].message["content"]
+        await update.message.reply_text(reply)
     except Exception as e:
-        logger.error(f"Ошибка при обработке текста через GPT-4: {e}")
-        await update.message.reply_text("Произошла ошибка при обработке запроса.")
+        logger.error(f"Ошибка обработки сообщения: {e}")
+        await update.message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
 
-async def analyze_file(update: Update, context: CallbackContext):
-    """Загрузка и анализ файла с Yandex Disk."""
-    try:
-        headers = {"Authorization": f"OAuth {YANDEX_DISK_TOKEN}"}
-        response = requests.get(YANDEX_FILE_URL, headers=headers)
-        response.raise_for_status()
+async def fetch_file_from_yandex_disk() -> pd.DataFrame:
+    """Загружает файл с Яндекс.Диска и возвращает DataFrame."""
+    headers = {"Authorization": f"OAuth {YANDEX_DISK_TOKEN}"}
+    response = requests.get(YANDEX_FILE_URL, headers=headers)
 
+    if response.status_code == 200:
         with open("data.csv", "wb") as file:
             file.write(response.content)
-        logger.info("Файл успешно загружен с Yandex Disk.")
+        logger.info("Файл успешно загружен с Яндекс.Диска.")
+        return pd.read_csv("data.csv", sep=';', encoding='utf-8')
+    else:
+        logger.error(f"Ошибка загрузки файла: {response.status_code}, {response.text}")
+        raise Exception("Не удалось загрузить файл с Яндекс.Диска.")
 
-        # Чтение файла
-        df = pd.read_csv("data.csv", sep=";")
-        await update.message.reply_text(f"Файл успешно загружен и содержит {len(df)} строк.")
+async def analyze_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Анализирует файл с Яндекс.Диска и отправляет результат пользователю."""
+    try:
+        df = await fetch_file_from_yandex_disk()
+        summary = df.describe().to_string()
+        await update.message.reply_text(f"Анализ данных:\n{summary}")
     except Exception as e:
-        logger.error(f"Ошибка при загрузке или анализе файла: {e}")
-        await update.message.reply_text("Не удалось загрузить или проанализировать файл.")
+        logger.error(f"Ошибка анализа файла: {e}")
+        await update.message.reply_text("Не удалось выполнить анализ файла.")
 
-async def main():
+async def main() -> None:
     """Основная функция для запуска бота."""
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Добавление обработчиков команд и сообщений
+    # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("analyze", analyze_file))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # Настройка вебхуков
-    webhook_url = f"{WEBHOOK_URL}:{PORT}/bot{TELEGRAM_BOT_TOKEN}"
-    await application.start_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=f"bot{TELEGRAM_BOT_TOKEN}",
-        webhook_url=webhook_url,
-    )
+    # Обработчики текстовых сообщений
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info(f"Бот запущен и слушает вебхуки на {webhook_url}")
-
-    # Ожидание завершения приложения
-    await application.stop()
+    # Запуск вебхука
+    try:
+        await application.start()
+        await application.updater.start_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TELEGRAM_BOT_TOKEN,
+            webhook_url=f"{WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}"
+        )
+        logger.info("Бот успешно запущен.")
+        await application.idle()
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
+    except RuntimeError as e:
+        logger.error(f"Ошибка выполнения asyncio: {e}")
