@@ -92,13 +92,14 @@ async def root_handler(request):
 # Вебхуковый маршрут
 async def webhook_handler(request):
     try:
+        logger.info("Получен запрос на маршрут /webhook")
         update_data = await request.json()
-        logger.info(f"Получены данные вебхука: {update_data}")
+        logger.info(f"Полученные данные: {update_data}")
         update = Update.de_json(update_data, application.bot)
         await application.update_queue.put(update)
         return web.Response(text="OK")
     except Exception as e:
-        logger.error(f"Ошибка вебхука: {e}", exc_info=True)
+        logger.error(f"Ошибка обработки вебхука: {e}", exc_info=True)
         return web.Response(status=500)
 
 # Основной процесс
